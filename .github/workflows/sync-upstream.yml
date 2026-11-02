@@ -1,0 +1,73 @@
+name: sync-upstream
+
+# Keeps this fork's nx2 equal to upstream nx2, with the fork's own commits (android.yml and this
+# file) replayed on top. It runs daily at 03:17 UTC; android.yml builds at 04:17 UTC, so the APK
+# is always from the newest commits.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: Djihads80/Eglantine
+  BRANCH: nx2
+
+jobs:
+  sync:
+    name: Sync with upstream
+    # Never run in the upstream repo itself.
+    if: github.repository != 'Djihads80/Eglantine'
+    runs-on: ubuntu-24.04
+    steps:
+      # GITHUB_TOKEN cannot push commits that change files under .github/workflows, and upstream
+      # does change them, so a personal access token is required.
+      - name: Check for SYNC_TOKEN
+        shell: bash
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::Add a SYNC_TOKEN secret (contents + workflows write access to this repo)."
+            exit 1
+          fi
+
+      - name: Check out fork
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Rebase onto upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "$BRANCH"
+
+          if git merge-base --is-ancestor "upstream/$BRANCH" HEAD; then
+            echo "Already up to date with ${UPSTREAM_REPO}@${BRANCH}"
+            exit 0
+          fi
+
+          echo "New upstream commits:"
+          git log --oneline "HEAD..upstream/$BRANCH" | head -20
+
+          if ! git rebase "upstream/$BRANCH"; then
+            git rebase --abort
+            echo "::error::Rebase conflicted. A file this fork changed was also changed upstream."
+            exit 1
+          fi
+
+          git push --force-with-lease origin "HEAD:$BRANCH"
+          echo "Pushed $(git rev-parse --short HEAD)"
