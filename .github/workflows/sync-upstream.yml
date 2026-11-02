@@ -61,7 +61,7 @@ jobs:
           fi
 
           echo "New upstream commits:"
-          git log --oneline "HEAD..upstream/$BRANCH" | head -20
+          git log --oneline -n 20 "HEAD..upstream/$BRANCH"
 
           if ! git rebase "upstream/$BRANCH"; then
             git rebase --abort
